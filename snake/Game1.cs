@@ -20,6 +20,10 @@ namespace CubeSnake3D
         private const float CubeSize = 4f;       // size of cube (world units)
         private const float Half = CubeSize / 2f;
 
+        // rotation angles
+        private float rotX = 0f;
+        private float rotY = 0f;
+
         // snake state (face, x, y)
         private readonly LinkedList<Cell> _snake = new();
         private Cell _food;
@@ -142,10 +146,20 @@ namespace CubeSnake3D
             if (kb.IsKeyDown(Keys.Escape)) Exit();
 
             // directional input - pending to apply on tick
-            if (kb.IsKeyDown(Keys.Up) || kb.IsKeyDown(Keys.W)) TrySetPending(Direction.Up);
-            if (kb.IsKeyDown(Keys.Down) || kb.IsKeyDown(Keys.S)) TrySetPending(Direction.Down);
-            if (kb.IsKeyDown(Keys.Left) || kb.IsKeyDown(Keys.A)) TrySetPending(Direction.Left);
-            if (kb.IsKeyDown(Keys.Right) || kb.IsKeyDown(Keys.D)) TrySetPending(Direction.Right);
+            if (kb.IsKeyDown(Keys.W)) TrySetPending(Direction.Up);
+            if (kb.IsKeyDown(Keys.S)) TrySetPending(Direction.Down);
+            if (kb.IsKeyDown(Keys.A)) TrySetPending(Direction.Left);
+            if (kb.IsKeyDown(Keys.D)) TrySetPending(Direction.Right);
+
+            // 3D rotation control - Q/E klávesy
+            if (kb.IsKeyDown(Keys.Q))
+                rotY -= 0.02f;
+            if (kb.IsKeyDown(Keys.E))
+                rotY += 0.02f;
+            if (kb.IsKeyDown(Keys.Z))
+                rotX -= 0.02f;
+            if (kb.IsKeyDown(Keys.X))
+                rotX += 0.02f;
 
             // Fixed: Single-press detection for pause and restart
             if (kb.IsKeyDown(Keys.P) && !_previousKeyboardState.IsKeyDown(Keys.P))
@@ -269,8 +283,11 @@ namespace CubeSnake3D
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
+            // Aplikuj rotaci na world matici
+            Matrix rotation = Matrix.CreateRotationX(rotX) * Matrix.CreateRotationY(rotY);
+
             // 3D: draw colored faces and snake cells in world space
-            _effect.World = Matrix.Identity;
+            _effect.World = rotation;
             _effect.View = _view;
             _effect.Projection = _projection;
             _effect.CurrentTechnique.Passes[0].Apply();
