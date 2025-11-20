@@ -16,13 +16,9 @@ namespace CubeSnake3D
         private BasicEffect _effect;
 
         // grid & cube
-        private const int GridSize = 4;          // grid per face (4x4 per face = 4x4x4 cube)
+        private const int GridSize = 4;          // grid per face (e.g. 6x6)
         private const float CubeSize = 4f;       // size of cube (world units)
-        private const float Half = CubeSize / 2f;
-
-        // rotation angles
-        private float rotX = 0f;
-        private float rotY = 0f;
+        private static readonly float Half = CubeSize / 2f;
 
         // snake state (face, x, y)
         private readonly LinkedList<Cell> _snake = new();
@@ -34,25 +30,25 @@ namespace CubeSnake3D
         private int _updateMs = 200;
         private double _accumulator;
 
-        // timing
-        private double _elapsedMs;
-
         // camera
         private Matrix _view;
         private Matrix _projection;
 
         // drawing helpers
         private VertexPositionColor[] _cubeWire; // optional wireframe
-        // Všechny strany sytě zelené
         private readonly Color[] _faceColors = {
-            Color.LimeGreen, Color.LimeGreen, Color.LimeGreen,
-            Color.LimeGreen, Color.LimeGreen, Color.LimeGreen
+            Color.LightSlateGray, Color.SandyBrown, Color.LightGreen,
+            Color.LightPink, Color.LightSkyBlue, Color.LightYellow
         };
 
         private Random _rnd = new();
 
-        // Keyboard state tracking for single-press detection
-        private KeyboardState _previousKeyboardState;
+        // keyboard previous state for single-press actions
+        private KeyboardState _prevKb;
+
+        // rotation of cube (optional)
+        private float rotX = 0f;
+        private float rotY = 0f;
 
         public Game1()
         {
@@ -63,7 +59,6 @@ namespace CubeSnake3D
 
         protected override void Initialize()
         {
-            // window
             _graphics.PreferredBackBufferWidth = 1000;
             _graphics.PreferredBackBufferHeight = 700;
             _graphics.ApplyChanges();
@@ -83,7 +78,7 @@ namespace CubeSnake3D
                 Projection = _projection
             };
 
-            // start
+            BuildCubeWire();
             StartNewGame();
 
             base.Initialize();
@@ -92,8 +87,7 @@ namespace CubeSnake3D
         private void StartNewGame()
         {
             _snake.Clear();
-            // start on face 0 in the middle
-            var start = new Cell(0, GridSize / 4, GridSize / 2);
+            var start = new Cell(0, GridSize / 2, GridSize / 2);
             _snake.AddLast(start);
             _snake.AddLast(new Cell(start.Face, start.X - 1, start.Y));
             _snake.AddLast(new Cell(start.Face, start.X - 2, start.Y));
@@ -110,12 +104,11 @@ namespace CubeSnake3D
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
-            BuildCubeWire();
         }
 
         private void BuildCubeWire()
         {
-            // optional: build wireframe vertices (not strictly necessary)
+            // wireframe edges (12 edges -> 24 vertices)
             _cubeWire = new VertexPositionColor[24];
             int i = 0;
             Vector3[] verts = {
@@ -129,7 +122,6 @@ namespace CubeSnake3D
                 new Vector3(Half, Half, Half),
                 new Vector3(-Half, Half, Half)
             };
-            // 12 edges (pairs)
             Action<int, int> addEdge = (a, b) =>
             {
                 _cubeWire[i++] = new VertexPositionColor(verts[a], Color.Black);
@@ -137,7 +129,7 @@ namespace CubeSnake3D
             };
             addEdge(0, 1); addEdge(1, 2); addEdge(2, 3); addEdge(3, 0); // back
             addEdge(4, 5); addEdge(5, 6); addEdge(6, 7); addEdge(7, 4); // front
-            addEdge(0, 4); addEdge(1, 5); addEdge(2, 6); addEdge(3, 7); // connections
+            addEdge(0, 4); addEdge(1, 5); addEdge(2, 6); addEdge(3, 7); // connects
         }
 
         protected override void Update(GameTime gameTime)
@@ -145,29 +137,29 @@ namespace CubeSnake3D
             var kb = Keyboard.GetState();
             if (kb.IsKeyDown(Keys.Escape)) Exit();
 
-            // directional input - pending to apply on tick
-            if (kb.IsKeyDown(Keys.W)) TrySetPending(Direction.Up);
-            if (kb.IsKeyDown(Keys.S)) TrySetPending(Direction.Down);
-            if (kb.IsKeyDown(Keys.A)) TrySetPending(Direction.Left);
-            if (kb.IsKeyDown(Keys.D)) TrySetPending(Direction.Right);
+            // rotate cube with Q/E/A/D for testing (optional)
+            if (kb.IsKeyDown(Keys.Q)) rotY -= 0.02f;
+            if (kb.IsKeyDown(Keys.E)) rotY += 0.02f;
+            if (kb.IsKeyDown(Keys.Z)) rotX -= 0.02f;
+            if (kb.IsKeyDown(Keys.X)) rotX += 0.02f;
 
-            // 3D rotation control - Q/E klávesy
-            if (kb.IsKeyDown(Keys.Q))
-                rotY -= 0.02f;
-            if (kb.IsKeyDown(Keys.E))
-                rotY += 0.02f;
-            if (kb.IsKeyDown(Keys.Z))
-                rotX -= 0.02f;
-            if (kb.IsKeyDown(Keys.X))
-                rotX += 0.02f;
+            // directional input (store pending direction)
+            if (kb.IsKeyDown(Keys.Up) || kb.IsKeyDown(Keys.W))
+                TrySetPending(Direction.Up);
+            if (kb.IsKeyDown(Keys.Down) || kb.IsKeyDown(Keys.S))
+                TrySetPending(Direction.Down);
+            if (kb.IsKeyDown(Keys.Left) || kb.IsKeyDown(Keys.A))
+                TrySetPending(Direction.Left);
+            if (kb.IsKeyDown(Keys.Right) || kb.IsKeyDown(Keys.D))
+                TrySetPending(Direction.Right);
 
-            // Fixed: Single-press detection for pause and restart
-            if (kb.IsKeyDown(Keys.P) && !_previousKeyboardState.IsKeyDown(Keys.P))
+            // single press P pause / R restart
+            if (kb.IsKeyDown(Keys.P) && !_prevKb.IsKeyDown(Keys.P))
                 _paused = !_paused;
-            if (kb.IsKeyDown(Keys.R) && !_previousKeyboardState.IsKeyDown(Keys.R) && _gameOver)
+            if (kb.IsKeyDown(Keys.R) && !_prevKb.IsKeyDown(Keys.R) && _gameOver)
                 StartNewGame();
 
-            _previousKeyboardState = kb;
+            _prevKb = kb;
 
             if (_paused || _gameOver)
             {
@@ -179,9 +171,10 @@ namespace CubeSnake3D
             if (_accumulator >= _updateMs)
             {
                 _accumulator -= _updateMs;
-                // apply pending direction (no 180 flips)
+                // apply pending direction (prevents immediate 180°)
                 if (!IsOpposite(_direction, _pendingDirection))
                     _direction = _pendingDirection;
+
                 Tick();
             }
 
@@ -203,29 +196,29 @@ namespace CubeSnake3D
         private void Tick()
         {
             var head = _snake.First.Value;
-            var next = head.Move(_direction, GridSize);
+            var candidate = head.Move(_direction, GridSize);
 
-            // simplified transitions: if out of bounds, map to another face with same coords clamped
-            if (next.X < 0 || next.X >= GridSize || next.Y < 0 || next.Y >= GridSize)
+            // if candidate is outside grid, compute transition using 3D method
+            if (candidate.X < 0 || candidate.X >= GridSize || candidate.Y < 0 || candidate.Y >= GridSize)
             {
-                // moveToNeighbor returns transformed cell (preserves direction); simple mapping used here
-                next = MoveToNeighborFace(head, _direction);
+                var res = MoveToNeighborFaceVia3D(head, _direction);
+                candidate = res.newCell;
+                _direction = res.newDirection; // update direction to local new axis
+                _pendingDirection = _direction;
             }
 
-            // wall/self collision on new face/cell
-            if (_snake.Any(s => s.Equals(next)))
+            // collision with self
+            if (_snake.Any(s => s.Equals(candidate)))
             {
                 _gameOver = true;
                 return;
             }
 
-            _snake.AddFirst(next);
+            _snake.AddFirst(candidate);
 
-            if (next.Equals(_food))
+            if (candidate.Equals(_food))
             {
-                // eat
                 PlaceFood();
-                // speed up a bit
                 _updateMs = Math.Max(60, _updateMs - 10);
             }
             else
@@ -234,39 +227,83 @@ namespace CubeSnake3D
             }
         }
 
-        // simplified neighbor mapping (prototype): pick neighbor face deterministically
-        private Cell MoveToNeighborFace(Cell from, Direction dir)
+        // Compute 3D move and map to target face coordinates + direction
+        private (Cell newCell, Direction newDirection) MoveToNeighborFaceVia3D(Cell from, Direction dir)
         {
-            // Very simple scheme: map direction to a different face index.
-            // This is intentionally simple for v1.0 prototype.
-            int newFace = from.Face;
-            int nx = from.X;
-            int ny = from.Y;
+            // local axes for 'from' face
+            Vector3 n = FaceNormal(from.Face);
+            Vector3 r = FaceRight(from.Face);
+            Vector3 u = FaceUp(from.Face);
 
-            switch (dir)
+            float cellWorld = CubeSize / GridSize;
+
+            // compute center position of the 'from' cell in world coords
+            float cx = -Half + (from.X + 0.5f) * cellWorld;
+            float cy = -Half + (from.Y + 0.5f) * cellWorld;
+            Vector3 center = n * Half + r * cx + u * cy;
+
+            // step vector in world coords (one cell in local axes)
+            Vector3 step = dir switch
             {
-                case Direction.Left:
-                    newFace = (from.Face + 3) % 6;
-                    nx = GridSize - 1;
-                    break;
-                case Direction.Right:
-                    newFace = (from.Face + 1) % 6;
-                    nx = 0;
-                    break;
-                case Direction.Up:
-                    newFace = (from.Face + 2) % 6;
-                    ny = 0;
-                    break;
-                case Direction.Down:
-                    newFace = (from.Face + 4) % 6;
-                    ny = GridSize - 1;
-                    break;
+                Direction.Left => -r * cellWorld,
+                Direction.Right => r * cellWorld,
+                Direction.Up => u * cellWorld,
+                Direction.Down => -u * cellWorld,
+                _ => Vector3.Zero
+            };
+
+            Vector3 newP = center + step * 1.01f; // small epsilon beyond edge
+
+            // choose face with largest dot(newP, normal)
+            int bestFace = 0;
+            float bestDot = float.MinValue;
+            for (int f = 0; f < 6; f++)
+            {
+                float d = Vector3.Dot(newP, FaceNormal(f));
+                if (d > bestDot)
+                {
+                    bestDot = d;
+                    bestFace = f;
+                }
             }
 
-            // clamp just in case
-            nx = Math.Clamp(nx, 0, GridSize - 1);
-            ny = Math.Clamp(ny, 0, GridSize - 1);
-            return new Cell(newFace, nx, ny);
+            // compute local coords on that face
+            Vector3 fn = FaceNormal(bestFace);
+            Vector3 fr = FaceRight(bestFace);
+            Vector3 fu = FaceUp(bestFace);
+
+            // vector from face center to point
+            Vector3 local = newP - fn * Half;
+
+            float lx = Vector3.Dot(local, fr); // -Half .. +Half
+            float ly = Vector3.Dot(local, fu);
+
+            float normalizedX = (lx + Half) / (CubeSize); // 0..1
+            float normalizedY = (ly + Half) / (CubeSize);
+
+            int gridX = (int)MathF.Floor(normalizedX * GridSize);
+            int gridY = (int)MathF.Floor(normalizedY * GridSize);
+
+            // clamp to valid grid
+            gridX = Math.Clamp(gridX, 0, GridSize - 1);
+            gridY = Math.Clamp(gridY, 0, GridSize - 1);
+
+            // determine new direction relative to new face axes by projecting step on fr/fu
+            float projR = Vector3.Dot(step, fr);
+            float projU = Vector3.Dot(step, fu);
+
+            Direction newDir;
+            if (MathF.Abs(projR) > MathF.Abs(projU))
+            {
+                newDir = projR > 0 ? Direction.Right : Direction.Left;
+            }
+            else
+            {
+                newDir = projU > 0 ? Direction.Up : Direction.Down;
+            }
+
+            var newCell = new Cell(bestFace, gridX, gridY);
+            return (newCell, newDir);
         }
 
         private void PlaceFood()
@@ -283,32 +320,26 @@ namespace CubeSnake3D
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
-            // Aplikuj rotaci na world matici
-            Matrix rotation = Matrix.CreateRotationX(rotX) * Matrix.CreateRotationY(rotY);
-
-            // 3D: draw colored faces and snake cells in world space
-            _effect.World = rotation;
+            // apply cube rotation if set
+            _effect.World = Matrix.CreateRotationX(rotX) * Matrix.CreateRotationY(rotY);
             _effect.View = _view;
             _effect.Projection = _projection;
-            _effect.CurrentTechnique.Passes[0].Apply();
 
-            // draw each face as colored quad - plná sytost barev
+            // draw faces (colored)
             for (int f = 0; f < 6; f++)
             {
-                DrawFaceQuad(f, _faceColors[f]);  // plná sytá zelená
-                DrawFaceGrid(f, Color.Black);      // výrazné černé čáry
+                DrawFaceQuad(f, _faceColors[f] * 0.8f);
+                DrawFaceGrid(f, Color.Black * 0.25f);
             }
 
-            // draw snake segments
+            // draw snake
             foreach (var seg in _snake)
-            {
                 DrawCellOnFace(seg, Color.DarkGreen);
-            }
 
             // draw food
             DrawCellOnFace(_food, Color.Red);
 
-            // draw wireframe cube edges (optional)
+            // draw wireframe
             GraphicsDevice.RasterizerState = new RasterizerState { CullMode = CullMode.None };
             foreach (var pass in _effect.CurrentTechnique.Passes)
             {
@@ -333,17 +364,14 @@ namespace CubeSnake3D
         // Draw grid lines on face (simple thin quads)
         private void DrawFaceGrid(int faceIndex, Color color)
         {
-            // draw vertical and horizontal lines as thin quads
             for (int i = 1; i < GridSize; i++)
             {
-                // vertical line at column i
                 var vline = FaceLineVertices(faceIndex, true, i, color);
                 foreach (var pass in _effect.CurrentTechnique.Passes)
                 {
                     pass.Apply();
                     GraphicsDevice.DrawUserPrimitives(PrimitiveType.TriangleList, vline, 0, 2);
                 }
-                // horizontal line at row i
                 var hline = FaceLineVertices(faceIndex, false, i, color);
                 foreach (var pass in _effect.CurrentTechnique.Passes)
                 {
@@ -364,17 +392,14 @@ namespace CubeSnake3D
             }
         }
 
-        // Build two triangles for face quad
         private VertexPositionColor[] FaceQuadVertices(int faceIndex, Color c)
         {
             Vector3 n = FaceNormal(faceIndex);
             Vector3 right = FaceRight(faceIndex);
             Vector3 up = FaceUp(faceIndex);
 
-            float cellWorld = CubeSize / GridSize;
             float faceHalf = CubeSize / 2f;
-            // corners in local face coords: (-half,-half) to (+half,+half)
-            Vector3 bl = n * Half + (-right - up) * faceHalf; // bottom-left
+            Vector3 bl = n * Half + (-right - up) * faceHalf;
             Vector3 br = n * Half + (right - up) * faceHalf;
             Vector3 tl = n * Half + (-right + up) * faceHalf;
             Vector3 tr = n * Half + (right + up) * faceHalf;
@@ -391,7 +416,6 @@ namespace CubeSnake3D
             };
         }
 
-        // thin quad for grid lines (vertical if isVertical true)
         private VertexPositionColor[] FaceLineVertices(int faceIndex, bool isVertical, int index, Color c)
         {
             Vector3 n = FaceNormal(faceIndex);
@@ -399,14 +423,12 @@ namespace CubeSnake3D
             Vector3 up = FaceUp(faceIndex);
 
             float cellWorld = CubeSize / GridSize;
-            float halfLine = 0.01f; // line thickness
-
-            float coord = -Half + index * cellWorld; // coordinate along axis
+            float halfLine = 0.01f;
+            float coord = -Half + index * cellWorld;
 
             if (isVertical)
             {
                 Vector3 center = n * Half + right * coord;
-                // create thin rectangle along up axis centered at center
                 Vector3 a = center + up * Half + (-right) * halfLine;
                 Vector3 b = center - up * Half + (-right) * halfLine;
                 Vector3 c1 = center - up * Half + (right) * halfLine;
@@ -424,7 +446,6 @@ namespace CubeSnake3D
             }
         }
 
-        // returns 2 triangles quad verts for a cell
         private VertexPositionColor[] FaceCellVertices(Cell cell, Color color)
         {
             Vector3 n = FaceNormal(cell.Face);
@@ -432,12 +453,11 @@ namespace CubeSnake3D
             Vector3 up = FaceUp(cell.Face);
 
             float cellWorld = CubeSize / GridSize;
-            // cell center: x -> right axis, y -> up axis; origin at center of face (-Half..Half)
             float cx = -Half + (cell.X + 0.5f) * cellWorld;
             float cy = -Half + (cell.Y + 0.5f) * cellWorld;
             Vector3 center = n * Half + right * cx + up * cy;
 
-            float h = cellWorld * 0.45f; // slightly smaller than cell
+            float h = cellWorld * 0.45f;
             Vector3 a = center + (-right) * h + up * h;
             Vector3 b = center + (-right) * h + (-up) * h;
             Vector3 c = center + right * h + (-up) * h;
@@ -493,7 +513,7 @@ namespace CubeSnake3D
             _ => Vector3.UnitY
         };
 
-        // Cell struct with Move method - FIXED
+        // Cell struct with Move method
         private readonly record struct Cell(int Face, int X, int Y)
         {
             public Cell Move(Direction dir, int gridSize)
