@@ -11,53 +11,45 @@ namespace CubeSnake3D
     {
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
-        // private SpriteFont _font;  // zakomentováno - nefunguje bez .spritefont souboru
 
         // 3D rendering
         private BasicEffect _effect;
 
         // grid & cube
-        private const int GridSize = 4;          // grid per face (e.g. 4x4)
-        private const float CubeSize = 4f;       // size of cube (world units)
+        private const int GridSize = 4;
+        private const float CubeSize = 4f;
         private static readonly float Half = CubeSize / 2f;
 
-        // snake state (face, x, y)
+        // snake state - now simpler, always moving in screen space
         private readonly LinkedList<Cell> _snake = new();
         private Cell _food;
-        private Direction _direction = Direction.Right;
+        private Direction _screenDirection = Direction.Right; // direction in screen space
         private Direction _pendingDirection = Direction.Right;
         private bool _paused;
         private bool _gameOver;
         private int _updateMs = 200;
         private double _accumulator;
 
-        // camera
+        // camera - fixed position
         private Matrix _view;
         private Matrix _projection;
 
-        // automatic rotation
+        // cube rotation - this rotates, not the camera
         private float targetRotX = 0f;
         private float targetRotY = 0f;
         private float currentRotX = 0f;
         private float currentRotY = 0f;
-        private const float RotationSpeed = 0.05f; // smoothing speed
+        private const float RotationSpeed = 0.1f;
 
         // drawing helpers
-        private VertexPositionColor[] _cubeWire; // optional wireframe
+        private VertexPositionColor[] _cubeWire;
         private readonly Color[] _faceColors = {
             Color.LimeGreen, Color.LimeGreen, Color.LimeGreen,
             Color.LimeGreen, Color.LimeGreen, Color.LimeGreen
         };
 
         private Random _rnd = new();
-
-        // keyboard previous state for single-press actions
         private KeyboardState _prevKb;
-
-        // manual rotation override (optional)
-        private bool manualRotation = false;
-        private float manualRotX = 0f;
-        private float manualRotY = 0f;
 
         public Game1()
         {
@@ -72,12 +64,11 @@ namespace CubeSnake3D
             _graphics.PreferredBackBufferHeight = 700;
             _graphics.ApplyChanges();
 
-            // camera: slightly behind and above looking at origin
-            _view = Matrix.CreateLookAt(new Vector3(6f, 6f, 6f), Vector3.Zero, Vector3.Up);
+            // camera: looking straight at front face
+            _view = Matrix.CreateLookAt(new Vector3(0f, 0f, 8f), Vector3.Zero, Vector3.Up);
             _projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver4,
                 GraphicsDevice.Viewport.AspectRatio, 0.1f, 100f);
 
-            // BasicEffect
             _effect = new BasicEffect(GraphicsDevice)
             {
                 VertexColorEnabled = true,
@@ -96,31 +87,37 @@ namespace CubeSnake3D
         private void StartNewGame()
         {
             _snake.Clear();
+
+            // Start on face 0 (front face)
             var start = new Cell(0, GridSize / 2, GridSize / 2);
             _snake.AddLast(start);
             _snake.AddLast(new Cell(start.Face, start.X - 1, start.Y));
             _snake.AddLast(new Cell(start.Face, start.X - 2, start.Y));
-            _direction = Direction.Right;
+
+            _screenDirection = Direction.Right;
             _pendingDirection = Direction.Right;
             _paused = false;
             _gameOver = false;
             _updateMs = 200;
             _accumulator = 0;
             _rnd = new Random();
-            manualRotation = false;
+
+            // Reset rotation
+            currentRotX = 0f;
+            currentRotY = 0f;
+            targetRotX = 0f;
+            targetRotY = 0f;
+
             PlaceFood();
-            UpdateTargetRotation();
         }
 
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
-            // _font = Content.Load<SpriteFont>("GameFont");  // zakomentováno
         }
 
         private void BuildCubeWire()
         {
-            // wireframe edges (12 edges -> 24 vertices)
             _cubeWire = new VertexPositionColor[24];
             int i = 0;
             Vector3[] verts = {
@@ -128,7 +125,6 @@ namespace CubeSnake3D
                 new Vector3(Half, -Half, -Half),
                 new Vector3(Half, Half, -Half),
                 new Vector3(-Half, Half, -Half),
-
                 new Vector3(-Half, -Half, Half),
                 new Vector3(Half, -Half, Half),
                 new Vector3(Half, Half, Half),
@@ -139,9 +135,9 @@ namespace CubeSnake3D
                 _cubeWire[i++] = new VertexPositionColor(verts[a], Color.Black);
                 _cubeWire[i++] = new VertexPositionColor(verts[b], Color.Black);
             };
-            addEdge(0, 1); addEdge(1, 2); addEdge(2, 3); addEdge(3, 0); // back
-            addEdge(4, 5); addEdge(5, 6); addEdge(6, 7); addEdge(7, 4); // front
-            addEdge(0, 4); addEdge(1, 5); addEdge(2, 6); addEdge(3, 7); // connects
+            addEdge(0, 1); addEdge(1, 2); addEdge(2, 3); addEdge(3, 0);
+            addEdge(4, 5); addEdge(5, 6); addEdge(6, 7); addEdge(7, 4);
+            addEdge(0, 4); addEdge(1, 5); addEdge(2, 6); addEdge(3, 7);
         }
 
         protected override void Update(GameTime gameTime)
@@ -149,24 +145,7 @@ namespace CubeSnake3D
             var kb = Keyboard.GetState();
             if (kb.IsKeyDown(Keys.Escape)) Exit();
 
-            // Manual rotation override with Q/E/Z/X (optional)
-            if (kb.IsKeyDown(Keys.Q) || kb.IsKeyDown(Keys.E) || kb.IsKeyDown(Keys.Z) || kb.IsKeyDown(Keys.X))
-            {
-                manualRotation = true;
-                if (kb.IsKeyDown(Keys.Q)) manualRotY -= 0.02f;
-                if (kb.IsKeyDown(Keys.E)) manualRotY += 0.02f;
-                if (kb.IsKeyDown(Keys.Z)) manualRotX -= 0.02f;
-                if (kb.IsKeyDown(Keys.X)) manualRotX += 0.02f;
-            }
-
-            // Reset to automatic rotation with Space
-            if (kb.IsKeyDown(Keys.Space) && !_prevKb.IsKeyDown(Keys.Space))
-            {
-                manualRotation = false;
-                UpdateTargetRotation();
-            }
-
-            // directional input (store pending direction)
+            // Simple screen-space directional input
             if (kb.IsKeyDown(Keys.Up) || kb.IsKeyDown(Keys.W))
                 TrySetPending(Direction.Up);
             if (kb.IsKeyDown(Keys.Down) || kb.IsKeyDown(Keys.S))
@@ -176,7 +155,6 @@ namespace CubeSnake3D
             if (kb.IsKeyDown(Keys.Right) || kb.IsKeyDown(Keys.D))
                 TrySetPending(Direction.Right);
 
-            // single press P pause / R restart
             if (kb.IsKeyDown(Keys.P) && !_prevKb.IsKeyDown(Keys.P))
                 _paused = !_paused;
             if (kb.IsKeyDown(Keys.R) && !_prevKb.IsKeyDown(Keys.R) && _gameOver)
@@ -190,97 +168,53 @@ namespace CubeSnake3D
                 return;
             }
 
+            // Smooth rotation
+            currentRotX += (targetRotX - currentRotX) * RotationSpeed;
+            currentRotY += (targetRotY - currentRotY) * RotationSpeed;
+
             _accumulator += gameTime.ElapsedGameTime.TotalMilliseconds;
             if (_accumulator >= _updateMs)
             {
                 _accumulator -= _updateMs;
-                // apply pending direction (prevents immediate 180°)
-                if (!IsOpposite(_direction, _pendingDirection))
-                    _direction = _pendingDirection;
+
+                if (!IsOpposite(_screenDirection, _pendingDirection))
+                    _screenDirection = _pendingDirection;
 
                 Tick();
-            }
-
-            // Smooth rotation interpolation
-            if (!manualRotation)
-            {
-                currentRotX = Lerp(currentRotX, targetRotX, RotationSpeed);
-                currentRotY = Lerp(currentRotY, targetRotY, RotationSpeed);
             }
 
             base.Update(gameTime);
         }
 
-        private float Lerp(float current, float target, float speed)
-        {
-            return current + (target - current) * speed;
-        }
-
-        private void UpdateTargetRotation()
-        {
-            // Set target rotation based on which face the snake head is on
-            var head = _snake.First.Value;
-
-            switch (head.Face)
-            {
-                case 0: // front (+Z)
-                    targetRotX = 0f;
-                    targetRotY = 0f;
-                    break;
-                case 1: // back (-Z)
-                    targetRotX = 0f;
-                    targetRotY = MathHelper.Pi;
-                    break;
-                case 2: // right (+X)
-                    targetRotX = 0f;
-                    targetRotY = -MathHelper.PiOver2;
-                    break;
-                case 3: // left (-X)
-                    targetRotX = 0f;
-                    targetRotY = MathHelper.PiOver2;
-                    break;
-                case 4: // top (+Y)
-                    targetRotX = MathHelper.PiOver2;
-                    targetRotY = 0f;
-                    break;
-                case 5: // bottom (-Y)
-                    targetRotX = -MathHelper.PiOver2;
-                    targetRotY = 0f;
-                    break;
-            }
-        }
-
         private void TrySetPending(Direction d)
         {
-            if (!IsOpposite(_direction, d))
+            if (!IsOpposite(_screenDirection, d))
                 _pendingDirection = d;
         }
 
         private static bool IsOpposite(Direction a, Direction b)
         {
-            return (a == Direction.Left && b == Direction.Right) || (a == Direction.Right && b == Direction.Left)
-                || (a == Direction.Up && b == Direction.Down) || (a == Direction.Down && b == Direction.Up);
+            return (a == Direction.Left && b == Direction.Right) ||
+                   (a == Direction.Right && b == Direction.Left) ||
+                   (a == Direction.Up && b == Direction.Down) ||
+                   (a == Direction.Down && b == Direction.Up);
         }
 
         private void Tick()
         {
             var head = _snake.First.Value;
-            var candidate = head.Move(_direction, GridSize);
 
-            // if candidate is outside grid, compute transition using 3D method
-            if (candidate.X < 0 || candidate.X >= GridSize || candidate.Y < 0 || candidate.Y >= GridSize)
+            // Move in screen-space direction
+            var candidate = head.Move(_screenDirection);
+
+            // Check if we need to wrap to another face
+            if (candidate.X < 0 || candidate.X >= GridSize ||
+                candidate.Y < 0 || candidate.Y >= GridSize)
             {
-                var res = MoveToNeighborFaceVia3D(head, _direction);
-                candidate = res.newCell;
-                _direction = res.newDirection; // update direction to local new axis
-                _pendingDirection = _direction;
-
-                // Update target rotation when changing faces
-                if (!manualRotation)
-                    UpdateTargetRotation();
+                candidate = WrapToNextFace(head, _screenDirection);
             }
 
-            // collision with self
+            // Collision check
             if (_snake.Any(s => s.Equals(candidate)))
             {
                 _gameOver = true;
@@ -300,83 +234,206 @@ namespace CubeSnake3D
             }
         }
 
-        // Compute 3D move and map to target face coordinates + direction
-        private (Cell newCell, Direction newDirection) MoveToNeighborFaceVia3D(Cell from, Direction dir)
+        private Cell WrapToNextFace(Cell from, Direction dir)
         {
-            // local axes for 'from' face
-            Vector3 n = FaceNormal(from.Face);
-            Vector3 r = FaceRight(from.Face);
-            Vector3 u = FaceUp(from.Face);
+            int newFace = from.Face;
+            int nx = from.X;
+            int ny = from.Y;
 
-            float cellWorld = CubeSize / GridSize;
-
-            // compute center position of the 'from' cell in world coords
-            float cx = -Half + (from.X + 0.5f) * cellWorld;
-            float cy = -Half + (from.Y + 0.5f) * cellWorld;
-            Vector3 center = n * Half + r * cx + u * cy;
-
-            // step vector in world coords (one cell in local axes)
-            Vector3 step = dir switch
+            // Simple face transitions - cube rotates to bring new face to front
+            switch (from.Face)
             {
-                Direction.Left => -r * cellWorld,
-                Direction.Right => r * cellWorld,
-                Direction.Up => u * cellWorld,
-                Direction.Down => -u * cellWorld,
-                _ => Vector3.Zero
-            };
+                case 0: // Front face
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 2; // Right face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 3; // Left face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 4; // Top face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 5; // Bottom face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
 
-            Vector3 newP = center + step * 1.01f; // small epsilon beyond edge
+                case 2: // Right face (now front after rotation)
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 1; // Back face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 0; // Front face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 4; // Top face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 5; // Bottom face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
 
-            // choose face with largest dot(newP, normal)
-            int bestFace = 0;
-            float bestDot = float.MinValue;
-            for (int f = 0; f < 6; f++)
-            {
-                float d = Vector3.Dot(newP, FaceNormal(f));
-                if (d > bestDot)
-                {
-                    bestDot = d;
-                    bestFace = f;
-                }
+                case 3: // Left face
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 0; // Front face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 1; // Back face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 4; // Top face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 5; // Bottom face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
+
+                case 1: // Back face
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 3; // Left face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 2; // Right face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 4; // Top face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 5; // Bottom face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
+
+                case 4: // Top face
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 2; // Right face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 3; // Left face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 1; // Back face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 0; // Front face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
+
+                case 5: // Bottom face
+                    if (dir == Direction.Right)
+                    {
+                        newFace = 2; // Right face
+                        nx = 0;
+                        ny = from.Y;
+                        targetRotY -= MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Left)
+                    {
+                        newFace = 3; // Left face
+                        nx = GridSize - 1;
+                        ny = from.Y;
+                        targetRotY += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Up)
+                    {
+                        newFace = 0; // Front face
+                        nx = from.X;
+                        ny = 0;
+                        targetRotX += MathHelper.PiOver2;
+                    }
+                    else if (dir == Direction.Down)
+                    {
+                        newFace = 1; // Back face
+                        nx = from.X;
+                        ny = GridSize - 1;
+                        targetRotX -= MathHelper.PiOver2;
+                    }
+                    break;
             }
 
-            // compute local coords on that face
-            Vector3 fn = FaceNormal(bestFace);
-            Vector3 fr = FaceRight(bestFace);
-            Vector3 fu = FaceUp(bestFace);
+            nx = Math.Clamp(nx, 0, GridSize - 1);
+            ny = Math.Clamp(ny, 0, GridSize - 1);
 
-            // vector from face center to point
-            Vector3 local = newP - fn * Half;
-
-            float lx = Vector3.Dot(local, fr); // -Half .. +Half
-            float ly = Vector3.Dot(local, fu);
-
-            float normalizedX = (lx + Half) / (CubeSize); // 0..1
-            float normalizedY = (ly + Half) / (CubeSize);
-
-            int gridX = (int)MathF.Floor(normalizedX * GridSize);
-            int gridY = (int)MathF.Floor(normalizedY * GridSize);
-
-            // clamp to valid grid
-            gridX = Math.Clamp(gridX, 0, GridSize - 1);
-            gridY = Math.Clamp(gridY, 0, GridSize - 1);
-
-            // determine new direction relative to new face axes by projecting step on fr/fu
-            float projR = Vector3.Dot(step, fr);
-            float projU = Vector3.Dot(step, fu);
-
-            Direction newDir;
-            if (MathF.Abs(projR) > MathF.Abs(projU))
-            {
-                newDir = projR > 0 ? Direction.Right : Direction.Left;
-            }
-            else
-            {
-                newDir = projU > 0 ? Direction.Up : Direction.Down;
-            }
-
-            var newCell = new Cell(bestFace, gridX, gridY);
-            return (newCell, newDir);
+            return new Cell(newFace, nx, ny);
         }
 
         private void PlaceFood()
@@ -393,30 +450,26 @@ namespace CubeSnake3D
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
-            // Use manual or automatic rotation
-            float rotX = manualRotation ? manualRotX : currentRotX;
-            float rotY = manualRotation ? manualRotY : currentRotY;
-
-            // apply cube rotation
-            _effect.World = Matrix.CreateRotationX(rotX) * Matrix.CreateRotationY(rotY);
+            // Rotate the CUBE, not the camera
+            _effect.World = Matrix.CreateRotationX(currentRotX) * Matrix.CreateRotationY(currentRotY);
             _effect.View = _view;
             _effect.Projection = _projection;
 
-            // draw faces (colored)
+            // Draw faces
             for (int f = 0; f < 6; f++)
             {
-                DrawFaceQuad(f, _faceColors[f]);      // plná sytost
-                DrawFaceGrid(f, Color.Black);          // výrazné černé čáry
+                DrawFaceQuad(f, _faceColors[f]);
+                DrawFaceGrid(f, Color.Black);
             }
 
-            // draw snake
+            // Draw snake
             foreach (var seg in _snake)
                 DrawCellOnFace(seg, Color.DarkGreen);
 
-            // draw food
+            // Draw food
             DrawCellOnFace(_food, Color.Red);
 
-            // draw wireframe
+            // Draw wireframe
             GraphicsDevice.RasterizerState = new RasterizerState { CullMode = CullMode.None };
             foreach (var pass in _effect.CurrentTechnique.Passes)
             {
@@ -427,7 +480,6 @@ namespace CubeSnake3D
             base.Draw(gameTime);
         }
 
-        // Draw a face colored quad (two triangles)
         private void DrawFaceQuad(int faceIndex, Color color)
         {
             var verts = FaceQuadVertices(faceIndex, color);
@@ -438,7 +490,6 @@ namespace CubeSnake3D
             }
         }
 
-        // Draw grid lines on face (simple thin quads)
         private void DrawFaceGrid(int faceIndex, Color color)
         {
             for (int i = 1; i < GridSize; i++)
@@ -458,7 +509,6 @@ namespace CubeSnake3D
             }
         }
 
-        // Draw a square cell (centered) on a face
         private void DrawCellOnFace(Cell cell, Color color)
         {
             var verts = FaceCellVertices(cell, color);
@@ -486,7 +536,6 @@ namespace CubeSnake3D
                 new VertexPositionColor(tl, c),
                 new VertexPositionColor(bl, c),
                 new VertexPositionColor(br, c),
-
                 new VertexPositionColor(tl, c),
                 new VertexPositionColor(br, c),
                 new VertexPositionColor(tr, c)
@@ -549,22 +598,20 @@ namespace CubeSnake3D
                 new VertexPositionColor(a, color),
                 new VertexPositionColor(b, color),
                 new VertexPositionColor(c, color),
-
                 new VertexPositionColor(a, color),
                 new VertexPositionColor(c, color),
                 new VertexPositionColor(d, color)
             };
         }
 
-        // face helpers: normal, right, up in world coords
         private Vector3 FaceNormal(int f) => f switch
         {
-            0 => new Vector3(0, 0, 1),   // front (+Z)
-            1 => new Vector3(0, 0, -1),  // back (-Z)
-            2 => new Vector3(1, 0, 0),   // right (+X)
-            3 => new Vector3(-1, 0, 0),  // left (-X)
-            4 => new Vector3(0, 1, 0),   // top (+Y)
-            5 => new Vector3(0, -1, 0),  // bottom (-Y)
+            0 => new Vector3(0, 0, 1),
+            1 => new Vector3(0, 0, -1),
+            2 => new Vector3(1, 0, 0),
+            3 => new Vector3(-1, 0, 0),
+            4 => new Vector3(0, 1, 0),
+            5 => new Vector3(0, -1, 0),
             _ => Vector3.Zero
         };
 
@@ -590,10 +637,9 @@ namespace CubeSnake3D
             _ => Vector3.UnitY
         };
 
-        // Cell struct with Move method
         private readonly record struct Cell(int Face, int X, int Y)
         {
-            public Cell Move(Direction dir, int gridSize)
+            public Cell Move(Direction dir)
             {
                 return dir switch
                 {
