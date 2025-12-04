@@ -11,12 +11,13 @@ namespace CubeSnake3D
     {
         private GraphicsDeviceManager _graphics;
         private SpriteBatch _spriteBatch;
+        // private SpriteFont _font;  // zakomentováno - nefunguje bez .spritefont souboru
 
         // 3D rendering
         private BasicEffect _effect;
 
         // grid & cube
-        private const int GridSize = 4;          // grid per face (e.g. 6x6)
+        private const int GridSize = 4;          // grid per face (e.g. 4x4)
         private const float CubeSize = 4f;       // size of cube (world units)
         private static readonly float Half = CubeSize / 2f;
 
@@ -37,8 +38,8 @@ namespace CubeSnake3D
         // drawing helpers
         private VertexPositionColor[] _cubeWire; // optional wireframe
         private readonly Color[] _faceColors = {
-            Color.LightSlateGray, Color.SandyBrown, Color.LightGreen,
-            Color.LightPink, Color.LightSkyBlue, Color.LightYellow
+            Color.LimeGreen, Color.LimeGreen, Color.LimeGreen,
+            Color.LimeGreen, Color.LimeGreen, Color.LimeGreen
         };
 
         private Random _rnd = new();
@@ -104,6 +105,7 @@ namespace CubeSnake3D
         protected override void LoadContent()
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
+            // _font = Content.Load<SpriteFont>("GameFont");  // zakomentováno
         }
 
         private void BuildCubeWire()
@@ -137,7 +139,7 @@ namespace CubeSnake3D
             var kb = Keyboard.GetState();
             if (kb.IsKeyDown(Keys.Escape)) Exit();
 
-            // rotate cube with Q/E/A/D for testing (optional)
+            // rotate cube with Q/E/Z/X
             if (kb.IsKeyDown(Keys.Q)) rotY -= 0.02f;
             if (kb.IsKeyDown(Keys.E)) rotY += 0.02f;
             if (kb.IsKeyDown(Keys.Z)) rotX -= 0.02f;
@@ -328,8 +330,8 @@ namespace CubeSnake3D
             // draw faces (colored)
             for (int f = 0; f < 6; f++)
             {
-                DrawFaceQuad(f, _faceColors[f] * 0.8f);
-                DrawFaceGrid(f, Color.Black * 0.25f);
+                DrawFaceQuad(f, _faceColors[f]);      // plná sytost
+                DrawFaceGrid(f, Color.Black);          // výrazné černé čáry
             }
 
             // draw snake
@@ -346,6 +348,16 @@ namespace CubeSnake3D
                 pass.Apply();
                 GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, _cubeWire, 0, _cubeWire.Length / 2);
             }
+
+            // Text overlay - zakomentováno (potřebuje .spritefont soubor)
+            /*
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_font, "WASD - Pohyb hada", new Vector2(10, 10), Color.White);
+            _spriteBatch.DrawString(_font, "Q/E - Otaceni Y", new Vector2(10, 35), Color.White);
+            _spriteBatch.DrawString(_font, "Z/X - Otaceni X", new Vector2(10, 60), Color.White);
+            _spriteBatch.DrawString(_font, "P - Pauza  |  R - Restart", new Vector2(10, 85), Color.White);
+            _spriteBatch.End();
+            */
 
             base.Draw(gameTime);
         }
