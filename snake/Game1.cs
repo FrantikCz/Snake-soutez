@@ -35,6 +35,13 @@ namespace CubeSnake3D
         private Matrix _view;
         private Matrix _projection;
 
+        // automatic rotation
+        private float targetRotX = 0f;
+        private float targetRotY = 0f;
+        private float currentRotX = 0f;
+        private float currentRotY = 0f;
+        private const float RotationSpeed = 0.05f; // smoothing speed
+
         // drawing helpers
         private VertexPositionColor[] _cubeWire; // optional wireframe
         private readonly Color[] _faceColors = {
@@ -47,9 +54,10 @@ namespace CubeSnake3D
         // keyboard previous state for single-press actions
         private KeyboardState _prevKb;
 
-        // rotation of cube (optional)
-        private float rotX = 0f;
-        private float rotY = 0f;
+        // manual rotation override (optional)
+        private bool manualRotation = false;
+        private float manualRotX = 0f;
+        private float manualRotY = 0f;
 
         public Game1()
         {
@@ -99,7 +107,9 @@ namespace CubeSnake3D
             _updateMs = 200;
             _accumulator = 0;
             _rnd = new Random();
+            manualRotation = false;
             PlaceFood();
+            UpdateTargetRotation();
         }
 
         protected override void LoadContent()
@@ -139,11 +149,22 @@ namespace CubeSnake3D
             var kb = Keyboard.GetState();
             if (kb.IsKeyDown(Keys.Escape)) Exit();
 
-            // rotate cube with Q/E/Z/X
-            if (kb.IsKeyDown(Keys.Q)) rotY -= 0.02f;
-            if (kb.IsKeyDown(Keys.E)) rotY += 0.02f;
-            if (kb.IsKeyDown(Keys.Z)) rotX -= 0.02f;
-            if (kb.IsKeyDown(Keys.X)) rotX += 0.02f;
+            // Manual rotation override with Q/E/Z/X (optional)
+            if (kb.IsKeyDown(Keys.Q) || kb.IsKeyDown(Keys.E) || kb.IsKeyDown(Keys.Z) || kb.IsKeyDown(Keys.X))
+            {
+                manualRotation = true;
+                if (kb.IsKeyDown(Keys.Q)) manualRotY -= 0.02f;
+                if (kb.IsKeyDown(Keys.E)) manualRotY += 0.02f;
+                if (kb.IsKeyDown(Keys.Z)) manualRotX -= 0.02f;
+                if (kb.IsKeyDown(Keys.X)) manualRotX += 0.02f;
+            }
+
+            // Reset to automatic rotation with Space
+            if (kb.IsKeyDown(Keys.Space) && !_prevKb.IsKeyDown(Keys.Space))
+            {
+                manualRotation = false;
+                UpdateTargetRotation();
+            }
 
             // directional input (store pending direction)
             if (kb.IsKeyDown(Keys.Up) || kb.IsKeyDown(Keys.W))
@@ -180,7 +201,53 @@ namespace CubeSnake3D
                 Tick();
             }
 
+            // Smooth rotation interpolation
+            if (!manualRotation)
+            {
+                currentRotX = Lerp(currentRotX, targetRotX, RotationSpeed);
+                currentRotY = Lerp(currentRotY, targetRotY, RotationSpeed);
+            }
+
             base.Update(gameTime);
+        }
+
+        private float Lerp(float current, float target, float speed)
+        {
+            return current + (target - current) * speed;
+        }
+
+        private void UpdateTargetRotation()
+        {
+            // Set target rotation based on which face the snake head is on
+            var head = _snake.First.Value;
+
+            switch (head.Face)
+            {
+                case 0: // front (+Z)
+                    targetRotX = 0f;
+                    targetRotY = 0f;
+                    break;
+                case 1: // back (-Z)
+                    targetRotX = 0f;
+                    targetRotY = MathHelper.Pi;
+                    break;
+                case 2: // right (+X)
+                    targetRotX = 0f;
+                    targetRotY = -MathHelper.PiOver2;
+                    break;
+                case 3: // left (-X)
+                    targetRotX = 0f;
+                    targetRotY = MathHelper.PiOver2;
+                    break;
+                case 4: // top (+Y)
+                    targetRotX = MathHelper.PiOver2;
+                    targetRotY = 0f;
+                    break;
+                case 5: // bottom (-Y)
+                    targetRotX = -MathHelper.PiOver2;
+                    targetRotY = 0f;
+                    break;
+            }
         }
 
         private void TrySetPending(Direction d)
@@ -207,6 +274,10 @@ namespace CubeSnake3D
                 candidate = res.newCell;
                 _direction = res.newDirection; // update direction to local new axis
                 _pendingDirection = _direction;
+
+                // Update target rotation when changing faces
+                if (!manualRotation)
+                    UpdateTargetRotation();
             }
 
             // collision with self
@@ -322,7 +393,11 @@ namespace CubeSnake3D
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
-            // apply cube rotation if set
+            // Use manual or automatic rotation
+            float rotX = manualRotation ? manualRotX : currentRotX;
+            float rotY = manualRotation ? manualRotY : currentRotY;
+
+            // apply cube rotation
             _effect.World = Matrix.CreateRotationX(rotX) * Matrix.CreateRotationY(rotY);
             _effect.View = _view;
             _effect.Projection = _projection;
@@ -348,16 +423,6 @@ namespace CubeSnake3D
                 pass.Apply();
                 GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, _cubeWire, 0, _cubeWire.Length / 2);
             }
-
-            // Text overlay - zakomentováno (potřebuje .spritefont soubor)
-            /*
-            _spriteBatch.Begin();
-            _spriteBatch.DrawString(_font, "WASD - Pohyb hada", new Vector2(10, 10), Color.White);
-            _spriteBatch.DrawString(_font, "Q/E - Otaceni Y", new Vector2(10, 35), Color.White);
-            _spriteBatch.DrawString(_font, "Z/X - Otaceni X", new Vector2(10, 60), Color.White);
-            _spriteBatch.DrawString(_font, "P - Pauza  |  R - Restart", new Vector2(10, 85), Color.White);
-            _spriteBatch.End();
-            */
 
             base.Draw(gameTime);
         }
